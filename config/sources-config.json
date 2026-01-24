@@ -1,0 +1,17 @@
+{
+  "sources": {
+    "zillow": {"name": "Zillow", "enabled": true, "priority": 1, "estimated_listings_daily": 1000},
+    "redfin": {"name": "Redfin", "enabled": true, "priority": 1, "estimated_listings_daily": 800},
+    "facebook_marketplace": {"name": "Facebook Marketplace", "enabled": true, "priority": 2, "estimated_listings_daily": 600},
+    "craigslist": {"name": "Craigslist", "enabled": true, "priority": 2, "estimated_listings_daily": 500},
+    "offerpad": {"name": "OfferPad", "enabled": true, "priority": 3, "estimated_listings_daily": 200},
+    "opendoor": {"name": "Opendoor", "enabled": true, "priority": 3, "estimated_listings_daily": 200},
+    "fsbo": {"name": "FSBO.com", "enabled": true, "priority": 2, "estimated_listings_daily": 300},
+    "forsalebyowner": {"name": "ForSaleByOwner", "enabled": true, "priority": 2, "estimated_listings_daily": 300},
+    "batchleads": {"name": "BatchLeads", "enabled": true, "priority": 1, "estimated_listings_daily": 500},
+    "propstream": {"name": "PropStream", "enabled": true, "priority": 1, "estimated_listings_daily": 400}
+  },
+  "daily_target_listings": 3500,
+  "max_workers": 10,
+  "timeout_seconds": 30
+}
