@@ -18,9 +18,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY app_production.py app.py
-COPY scrapers/ scrapers/
-COPY config/ config/
+COPY app_production.py .
+COPY scrapers/ scrapers/ || true
+COPY config/ config/ || true
 
 # Create .env file if not exists
 RUN touch .env
@@ -32,5 +32,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run FastAPI app
-CMD ["python", "app.py"]
+# Run production FastAPI app (NOT the stub app.py)
+CMD ["python", "-m", "uvicorn", "app_production:app", "--host", "0.0.0.0", "--port", "8000"]
