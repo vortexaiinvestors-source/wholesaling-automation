@@ -1,0 +1,27 @@
+# Railway Deployment Configuration
+# Real Estate Wholesaling System
+
+$schema: https://railway.app/railway.schema.json
+
+services:
+  vortexai-api:
+    build:
+      builder: dockerfile
+    variables:
+      SUPABASE_URL: ${{ SUPABASE_URL }}
+      SUPABASE_KEY: ${{ SUPABASE_KEY }}
+      OPENAI_API_KEY: ${{ OPENAI_API_KEY }}
+      SCRAPERAPI_KEY: ${{ SCRAPERAPI_KEY }}
+      APIFY_API_KEY: ${{ APIFY_API_KEY }}
+      SENDGRID_API_KEY: ${{ SENDGRID_API_KEY }}
+      RAILWAY_API_TOKEN: ${{ RAILWAY_API_TOKEN }}
+      LOG_LEVEL: INFO
+      DEBUG: false
+    envPath: /.env
+
+  postgres:
+    image: postgres:15-alpine
+    variables:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${{ POSTGRES_PASSWORD }}
+      POSTGRES_DB: postgres
