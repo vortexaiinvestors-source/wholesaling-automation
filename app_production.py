@@ -1,9 +1,9 @@
 """
-VORTEXAI PRODUCTION BACKEND – FULL AUTOMATION ENGINE (STABLE)
+VORTEXAI PRODUCTION BACKEND – FULL AUTOMATION ENGINE (STABLE + SECURED)
 Database: Supabase / Railway Postgres
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import logging
@@ -69,7 +69,7 @@ Base.metadata.create_all(bind=engine)
 # FASTAPI
 # -------------------
 
-app = FastAPI(title="VortexAI Platform", version="3.3")
+app = FastAPI(title="VortexAI Platform", version="3.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -123,7 +123,15 @@ async def health():
         db.close()
 
 @app.post("/admin/webhooks/deal-ingest")
-async def ingest_deal(data: dict):
+async def ingest_deal(
+    data: dict,
+    x_ingest_key: str = Header(default="")
+):
+    expected_key = os.getenv("API_INGEST_KEY", "")
+
+    if expected_key and x_ingest_key != expected_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     db = SessionLocal()
     try:
         deal = Deal(
