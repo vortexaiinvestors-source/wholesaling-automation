@@ -100,6 +100,15 @@ def health():
 
 # ==================== PORTALS ====================
 
+@app.get("/portals", response_class=HTMLResponse)
+def portals():
+    """Combined buyer/seller/admin portal"""
+    try:
+        with open('frontend_portals.html', 'r') as f:
+            return f.read()
+    except:
+        return """<html><body><h1>Portal not found</h1></body></html>"""
+
 @app.get("/seller", response_class=HTMLResponse)
 def seller_portal():
     """Seller submission form"""
@@ -296,7 +305,7 @@ def ingest_deal(data: DealData):
         conn.close()
         
         logger.info(f"Deal ingested: {data.asset_type} in {data.location}")
-        return {"status": "ok", "message": "Deal ingested"}
+        return {"status": "ok", "message": "Deal ingested", "deal_id": "auto_generated"}
     except Exception as e:
         logger.error(f"Error ingesting deal: {e}")
         return {"status": "error", "message": str(e)}
@@ -459,7 +468,11 @@ def get_kpis():
             "total_deals": 0,
             "deals_today": 0,
             "active_buyers": 0,
-            "avg_deal_value": 0
+            "avg_deal_value": 0,
+            "high_score_deals": 0,
+            "total_value": 0,
+            "buyers_active": 0,
+            "average_price": 0
         }
     
     try:
@@ -482,6 +495,14 @@ def get_kpis():
         cur.execute("SELECT AVG(price) FROM deals")
         avg_value = cur.fetchone()[0] or 0
         
+        # High score deals
+        cur.execute("SELECT COUNT(*) FROM deals WHERE score >= 80")
+        high_score = cur.fetchone()[0]
+        
+        # Total portfolio value
+        cur.execute("SELECT SUM(price) FROM deals")
+        total_value = cur.fetchone()[0] or 0
+        
         cur.close()
         conn.close()
         
@@ -491,6 +512,10 @@ def get_kpis():
             "deals_today": deals_today,
             "active_buyers": active_buyers,
             "avg_deal_value": round(avg_value, 2),
+            "high_score_deals": high_score,
+            "total_value": int(total_value),
+            "buyers_active": active_buyers,
+            "average_price": round(avg_value, 2),
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
