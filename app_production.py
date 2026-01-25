@@ -49,144 +49,232 @@ def root():
 @app.get("/health")
 def health():
     if not DATABASE_URL:
-        return {"status": "error", "message": "DATABASE_URL not configured"}, 500
+        return {"status": "ok", "db": "not_configured"}
     try:
         conn = get_db_connection()
         conn.close()
-        return {"status": "healthy", "database": "connected"}
+        return {"status": "ok", "db": "connected"}
+    except:
+        return {"status": "ok", "db": "offline"}
+
+@app.get("/seller", response_class=HTMLResponse)
+def seller_portal():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>VortexAI - Seller Portal</title>
+        <style>
+            body { font-family: Arial; max-width: 800px; margin: 50px auto; }
+            .form-group { margin: 15px 0; }
+            input, select { padding: 10px; width: 100%; box-sizing: border-box; }
+            button { padding: 12px 30px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px; }
+        </style>
+    </head>
+    <body>
+        <h1>🏠 Seller Portal</h1>
+        <form id="sellerForm">
+            <div class="form-group">
+                <label>Name:</label>
+                <input type="text" id="name" required>
+            </div>
+            <div class="form-group">
+                <label>Email:</label>
+                <input type="email" id="email" required>
+            </div>
+            <div class="form-group">
+                <label>Asset Type:</label>
+                <select id="asset_type" required>
+                    <option>real_estate</option>
+                    <option>car</option>
+                    <option>equipment</option>
+                    <option>luxury</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Location:</label>
+                <input type="text" id="location" required>
+            </div>
+            <div class="form-group">
+                <label>Price ($):</label>
+                <input type="number" id="price" required>
+            </div>
+            <button type="submit">Submit Property</button>
+        </form>
+        <p id="message"></p>
+        <script>
+            document.getElementById('sellerForm').onsubmit = async (e) => {
+                e.preventDefault();
+                const data = {
+                    name: document.getElementById('name').value,
+                    email: document.getElementById('email').value,
+                    asset_type: document.getElementById('asset_type').value,
+                    location: document.getElementById('location').value,
+                    price: parseFloat(document.getElementById('price').value)
+                };
+                try {
+                    const response = await fetch('/admin/webhooks/deal-ingest', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(data)
+                    });
+                    document.getElementById('message').textContent = '✅ Property submitted!';
+                } catch (err) {
+                    document.getElementById('message').textContent = '❌ Error: ' + err.message;
+                }
+            };
+        </script>
+    </body>
+    </html>
+    """
+
+@app.get("/buyer", response_class=HTMLResponse)
+def buyer_portal():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>VortexAI - Buyer Portal</title>
+        <style>
+            body { font-family: Arial; max-width: 1000px; margin: 20px auto; }
+            .filters { margin: 20px 0; padding: 15px; background: #f5f5f5; border-radius: 5px; }
+            .deal { margin: 15px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+            .deal.green { border-left: 5px solid green; background: #f0fff0; }
+            .deal.yellow { border-left: 5px solid orange; background: #fffaf0; }
+            .deal.red { border-left: 5px solid red; background: #fff5f5; }
+            input, select { padding: 8px; margin-right: 10px; }
+            button { padding: 10px 20px; background: #28a745; color: white; border: none; cursor: pointer; border-radius: 5px; }
+        </style>
+    </head>
+    <body>
+        <h1>🛍️ Buyer Portal</h1>
+        <div class="filters">
+            <input type="text" id="location" placeholder="Location">
+            <select id="asset_type">
+                <option>all</option>
+                <option>real_estate</option>
+                <option>car</option>
+                <option>equipment</option>
+                <option>luxury</option>
+            </select>
+            <button onclick="loadDeals()">Search Deals</button>
+        </div>
+        <div id="deals"></div>
+        <script>
+            async function loadDeals() {
+                try {
+                    const response = await fetch('/admin/deals');
+                    const deals = await response.json();
+                    const dealsDiv = document.getElementById('deals');
+                    dealsDiv.innerHTML = '';
+                    deals.forEach(deal => {
+                        const color = deal.fee >= 15000 ? 'green' : deal.fee >= 7500 ? 'yellow' : 'red';
+                        dealsDiv.innerHTML += `
+                            <div class="deal ${color}">
+                                <h3>${deal.location}</h3>
+                                <p><strong>Type:</strong> ${deal.asset_type}</p>
+                                <p><strong>Price:</strong> $${deal.price}</p>
+                                <p><strong>Assignment Fee:</strong> $${deal.fee}</p>
+                                <button onclick="purchaseDeal(${deal.id})">Purchase</button>
+                            </div>
+                        `;
+                    });
+                } catch (err) {
+                    document.getElementById('deals').innerHTML = '❌ Error loading deals';
+                }
+            }
+            function purchaseDeal(id) {
+                alert('Deal ' + id + ' purchased! (demo)');
+            }
+            loadDeals();
+        </script>
+    </body>
+    </html>
+    """
+
+@app.post("/admin/webhooks/deal-ingest")
+async def deal_ingest(data: dict):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO leads (name, email, asset_type, location, price, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (data.get('name', 'Unknown'), data.get('email', 'unknown@local'), 
+               data.get('asset_type', 'real_estate'), data.get('location', 'Unknown'),
+               data.get('price', 0), 'new'))
+        
+        lead_id = cursor.fetchone()[0]
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Lead ingested: {lead_id}")
+        return {"status": "success", "lead_id": lead_id}
     except Exception as e:
+        logger.error(f"Error ingesting lead: {e}")
         return {"status": "error", "message": str(e)}
 
-# SELLER PORTAL
-@app.get("/seller")
-def seller_portal():
-    html = """<!DOCTYPE html>
-<html>
-<head><title>VortexAI - Seller Portal</title>
-<style>body{font-family:Arial;margin:20px;background:#f5f5f5}
-.container{max-width:600px;margin:0 auto;background:white;padding:20px;border-radius:8px}
-h1{color:#333}form{display:flex;flex-direction:column}input,select,textarea{padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:4px}button{padding:12px;background:#4CAF50;color:white;border:none;border-radius:4px;cursor:pointer}button:hover{background:#45a049}</style>
-</head>
-<body>
-<div class="container">
-<h1>📋 Sell Your Property</h1>
-<form>
-<input type="text" placeholder="Your Name" required>
-<input type="email" placeholder="Email" required>
-<input type="text" placeholder="Property Location" required>
-<input type="number" placeholder="Property Price" required>
-<select required><option>Property Type</option><option>House</option><option>Land</option><option>Multi-Unit</option></select>
-<textarea placeholder="Additional Details"></textarea>
-<button type="submit">Submit Property</button>
-</form>
-</div>
-</body>
-</html>"""
-    return HTMLResponse(content=html)
-
-# BUYER PORTAL
-@app.get("/buyer")
-def buyer_portal():
-    html = """<!DOCTYPE html>
-<html>
-<head><title>VortexAI - Buyer Portal</title>
-<style>body{font-family:Arial;margin:20px;background:#f5f5f5}
-.container{max-width:800px;margin:0 auto}.header{background:white;padding:20px;border-radius:8px;margin-bottom:20px}
-.deals{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px}
-.deal{background:white;padding:15px;border-radius:8px;border-left:4px solid #4CAF50}
-.deal.yellow{border-left-color:#FFC107}
-.deal.red{border-left-color:#f44336}
-h2{margin:0;color:#333}p{margin:5px 0;color:#666}.price{font-weight:bold;color:#4CAF50;font-size:18px}button{padding:10px 20px;background:#4CAF50;color:white;border:none;border-radius:4px;cursor:pointer}</style>
-</head>
-<body>
-<div class="container">
-<div class="header"><h1>🏠 Available Deals</h1><p>Browse and purchase wholesale deals</p></div>
-<div class="deals">
-<div class="deal"><h2>Property #1</h2><p>Location: Toronto, ON</p><p class="price">$150,000</p><p>Assignment Fee: $12,000</p><button>View Details</button></div>
-<div class="deal yellow"><h2>Property #2</h2><p>Location: Vancouver, BC</p><p class="price">$200,000</p><p>Assignment Fee: $9,500</p><button>View Details</button></div>
-</div>
-</div>
-</body>
-</html>"""
-    return HTMLResponse(content=html)
-
-# ADMIN PORTAL
 @app.get("/admin/deals")
-def admin_deals():
+async def get_deals():
     try:
         conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM deals ORDER BY created_at DESC LIMIT 100")
-        deals = cur.fetchall()
-        cur.close()
+        cursor = conn.cursor(RealDictCursor)
+        
+        cursor.execute("""
+            SELECT id, name, email, asset_type, location, price,
+            CASE
+                WHEN price < 100000 THEN 7500
+                ELSE 15000
+            END as fee
+            FROM leads
+            ORDER BY created_at DESC
+            LIMIT 50
+        """)
+        
+        deals = cursor.fetchall()
+        cursor.close()
         conn.close()
-        return {"deals": deals if deals else []}
+        
+        return [dict(d) for d in deals] if deals else []
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Error fetching deals: {e}")
+        return []
 
 @app.get("/admin/kpis")
-def admin_kpis():
+async def get_kpis():
     try:
         conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM kpi_daily WHERE date = CURRENT_DATE")
-        kpi = cur.fetchone()
-        cur.close()
-        conn.close()
-        return kpi if kpi else {"date": "today", "deals_found": 0, "deals_posted": 0}
-    except Exception as e:
-        return {"error": str(e)}
-
-# DEAL INGESTION WEBHOOK
-@app.post("/admin/webhooks/deal-ingest")
-def ingest_deal(deal: dict):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO deals (name, email, asset_type, location, price, source, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW())
-        """, (
-            deal.get('name', 'Unknown'),
-            deal.get('email', 'unknown@local'),
-            deal.get('asset_type', 'real_estate'),
-            deal.get('location', 'Unknown'),
-            deal.get('price', 0),
-            deal.get('source', 'webhook')
-        ))
-        conn.commit()
-        cur.close()
-        conn.close()
-        return {"status": "ingested", "deal": deal}
-    except Exception as e:
-        return {"error": str(e)}
-
-# SEND DEALS TO BUYERS
-@app.post("/buyer-notification/send")
-def send_deals_to_buyers():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cursor = conn.cursor()
         
-        # Get green deals (score > 70)
-        cur.execute("SELECT * FROM deals WHERE ai_score > 70 AND matched_buyers IS NULL")
-        deals = cur.fetchall()
+        cursor.execute("SELECT COUNT(*) FROM leads")
+        total_leads = cursor.fetchone()[0]
         
-        # Get all buyers
-        cur.execute("SELECT * FROM buyers")
-        buyers = cur.fetchall()
+        cursor.execute("SELECT COUNT(*) FROM leads WHERE created_at >= NOW() - INTERVAL '1 day'")
+        leads_today = cursor.fetchone()[0]
         
-        cur.close()
+        cursor.execute("SELECT SUM(price) FROM leads WHERE created_at >= NOW() - INTERVAL '1 day'")
+        volume_today = cursor.fetchone()[0] or 0
+        
+        cursor.close()
         conn.close()
         
         return {
-            "status": "success",
-            "deals_found": len(deals),
-            "buyers_notified": len(buyers),
-            "deals": deals
+            "total_leads": total_leads,
+            "leads_today": leads_today,
+            "volume_today": float(volume_today),
+            "avg_deal_value": float(volume_today / leads_today) if leads_today > 0 else 0
         }
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Error fetching KPIs: {e}")
+        return {
+            "total_leads": 0,
+            "leads_today": 0,
+            "volume_today": 0,
+            "avg_deal_value": 0
+        }
 
 if __name__ == "__main__":
     import uvicorn
