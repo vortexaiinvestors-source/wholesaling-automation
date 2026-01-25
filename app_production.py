@@ -1,42 +1,36 @@
-from fastapi import FastAPI, HTTPException
+import os
+import logging
+import asyncio
+import smtplib
+from email.mime.text import MIMEText
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-import logging
-import os
-from dotenv import load_dotenv
-import json
 from datetime import datetime
 from pydantic import BaseModel
-
-try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-except ImportError:
-    psycopg2 = None
+from dotenv import load_dotenv
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("vortexai")
 
-app = FastAPI(title="VortexAI", version="3.0.0")
+app = FastAPI(title="VortexAI", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    DATABASE_URL = "postgresql://postgres.ggjgaftekrafsuixmosd:IVq3iqIEtfnKAtGy@aws-0-us-west-2.pooler.supabase.com:5432/postgres"
-logger.info(f"Using DATABASE_URL: {DATABASE_URL[:50]}...")
 
-def get_db_connection():
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL not set")
+def get_db():
     return psycopg2.connect(DATABASE_URL)
+
+# ---------------- MODELS ----------------
 
 class DealData(BaseModel):
     name: str
@@ -50,540 +44,161 @@ class BuyerRegister(BaseModel):
     name: str
     email: str
     location: str = ""
-    asset_types: str = "real_estate"
+    asset_types: str = "any"
     min_budget: float = 0
-    max_budget: float = 1000000
+    max_budget: float = 999999999
+
+# ---------------- EMAIL ----------------
+
+def send_email(buyer_email, deal):
+    try:
+        body = f"""
+🔥 NEW DEAL FOUND
+
+Type: {deal['asset_type']}
+Location: {deal['location']}
+Price: ${deal['price']}
+Score: {deal['score']}
+
+Login to view full details.
+"""
+
+        msg = MIMEText(body)
+        msg["Subject"] = "New Investment Deal Found"
+        msg["From"] = os.getenv("EMAIL_FROM")
+        msg["To"] = buyer_email
+
+        server = smtplib.SMTP(os.getenv("SMTP_HOST"), int(os.getenv("SMTP_PORT")))
+        server.starttls()
+        server.login(os.getenv("SMTP_USER"), os.getenv("SMTP_PASS"))
+        server.send_message(msg)
+        server.quit()
+
+        logger.info(f"📧 Email sent to {buyer_email}")
+
+    except Exception as e:
+        logger.error(f"Email error: {e}")
+
+# ---------------- AI MATCHING ----------------
+
+def match(buyer, deal):
+    if buyer["asset_types"] not in ("any", deal["asset_type"]):
+        return False
+
+    if buyer["location"] and buyer["location"].lower() not in deal["location"].lower():
+        return False
+
+    if not (buyer["min_budget"] <= deal["price"] <= buyer["max_budget"]):
+        return False
+
+    if deal["score"] < 60:
+        return False
+
+    return True
+
+# ---------------- AUTOMATION ENGINE ----------------
+
+async def automation_loop():
+    await asyncio.sleep(10)
+
+    while True:
+        logger.info("🔁 Automation running...")
+
+        try:
+            conn = get_db()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute("SELECT * FROM deals WHERE notified = false AND score >= 60 LIMIT 50")
+            deals = cur.fetchall()
+
+            cur.execute("SELECT * FROM buyers WHERE active = true")
+            buyers = cur.fetchall()
+
+            sent = 0
+
+            for deal in deals:
+                for buyer in buyers:
+                    if match(buyer, deal):
+                        send_email(buyer["email"], deal)
+                        cur.execute("UPDATE deals SET notified = true WHERE id = %s", (deal["id"],))
+                        conn.commit()
+                        sent += 1
+                        break
+
+            cur.close()
+            conn.close()
+
+            logger.info(f"✅ Sent {sent} notifications")
+
+        except Exception as e:
+            logger.error(f"Automation error: {e}")
+
+        await asyncio.sleep(900)  # 15 minutes
+
+@app.on_event("startup")
+async def start():
+    asyncio.create_task(automation_loop())
+
+# ---------------- API ----------------
 
 @app.get("/")
 def root():
-    return {"system": "VortexAI", "status": "operational", "version": "3.0.0"}
+    return {"status": "ok"}
 
 @app.get("/health")
 def health():
-    if not DATABASE_URL:
-        return {"status": "operational", "service": "VortexAI", "version": "3.0.0", "db": "not_configured"}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM deals")
-        deals_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM buyers WHERE active = true")
-        buyers_count = cur.fetchone()[0]
-        cur.close()
-        conn.close()
-        
-        return {
-            "status": "operational",
-            "service": "VortexAI",
-            "version": "3.0.0",
-            "deals_count": deals_count,
-            "buyers_count": buyers_count,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Health check error: {e}")
-        return {"status": "operational", "service": "VortexAI", "version": "3.0.0", "db": "error", "error": str(e)}
-
-@app.get("/seller", response_class=HTMLResponse)
-def seller_portal():
-    return """
-    <html>
-        <head>
-            <title>VortexAI - Seller Portal</title>
-            <style>
-                body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-                h1 { color: #333; }
-                form { background: #f5f5f5; padding: 20px; border-radius: 8px; }
-                label { display: block; margin: 10px 0 5px 0; font-weight: bold; }
-                input, textarea, select { width: 100%; padding: 8px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-                button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%; }
-                button:hover { background: #0056b3; }
-                .success { color: green; display: none; }
-            </style>
-        </head>
-        <body>
-            <h1>🏠 Seller Portal</h1>
-            <p>Submit your property for deals</p>
-            <form id="sellerForm">
-                <label>Name/Contact:</label>
-                <input type="text" name="name" required>
-                
-                <label>Email:</label>
-                <input type="email" name="email" required>
-                
-                <label>Asset Type:</label>
-                <select name="asset_type">
-                    <option>real_estate</option>
-                    <option>car</option>
-                    <option>equipment</option>
-                    <option>luxury</option>
-                </select>
-                
-                <label>Location:</label>
-                <input type="text" name="location" placeholder="City, State" required>
-                
-                <label>Price:</label>
-                <input type="number" name="price" step="1000" required>
-                
-                <label>Description:</label>
-                <textarea name="description" rows="4"></textarea>
-                
-                <button type="submit">Submit Property</button>
-                <p class="success" id="success">✅ Property submitted! Our system will match you with buyers.</p>
-            </form>
-            <script>
-                document.getElementById('sellerForm').onsubmit = async (e) => {
-                    e.preventDefault();
-                    const data = new FormData(e.target);
-                    const payload = Object.fromEntries(data);
-                    payload.price = parseFloat(payload.price);
-                    
-                    const res = await fetch('/admin/webhooks/deal-ingest', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    
-                    document.getElementById('success').style.display = 'block';
-                    e.target.reset();
-                };
-            </script>
-        </body>
-    </html>
-    """
-
-@app.get("/buyer", response_class=HTMLResponse)
-def buyer_portal():
-    return """
-    <html>
-        <head>
-            <title>VortexAI - Buyer Portal</title>
-            <style>
-                body { font-family: Arial, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
-                h1 { color: #333; }
-                .filter-box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
-                .filter-box input, .filter-box select { padding: 8px; margin-right: 10px; border-radius: 4px; border: 1px solid #ddd; }
-                .deals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-                .deal-card { border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 5px solid; }
-                .deal-card.green { border-left-color: #28a745; background: #f0fff4; }
-                .deal-card.yellow { border-left-color: #ffc107; background: #fffef0; }
-                .deal-card.red { border-left-color: #dc3545; background: #ffe6e6; }
-                .deal-card h3 { margin-top: 0; }
-                .score { font-weight: bold; font-size: 18px; }
-                .price { color: #007bff; font-size: 20px; font-weight: bold; }
-                button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
-                button:hover { background: #0056b3; }
-                .loading { text-align: center; color: #666; }
-            </style>
-        </head>
-        <body>
-            <h1>💰 Buyer Portal</h1>
-            <div class="filter-box">
-                <input type="text" id="location" placeholder="Location (City, State)">
-                <select id="assetType">
-                    <option value="">All Asset Types</option>
-                    <option value="real_estate">Real Estate</option>
-                    <option value="car">Car</option>
-                    <option value="equipment">Equipment</option>
-                    <option value="luxury">Luxury</option>
-                </select>
-                <button onclick="loadDeals()">🔍 Search</button>
-            </div>
-            <div id="deals" class="deals-grid">
-                <p class="loading">Loading deals...</p>
-            </div>
-            <script>
-                async function loadDeals() {
-                    const res = await fetch('/admin/deals');
-                    const data = await res.json();
-                    const deals = data.deals || [];
-                    
-                    const location = document.getElementById('location').value.toLowerCase();
-                    const assetType = document.getElementById('assetType').value;
-                    
-                    const filtered = deals.filter(d => {
-                        const locMatch = !location || (d.location || '').toLowerCase().includes(location);
-                        const typeMatch = !assetType || d.asset_type === assetType;
-                        return locMatch && typeMatch;
-                    });
-                    
-                    const html = filtered.map(d => {
-                        const score = d.score || 50;
-                        const color = score >= 15 ? 'green' : score >= 7 ? 'yellow' : 'red';
-                        return `
-                            <div class="deal-card ${color}">
-                                <h3>${d.asset_type.toUpperCase()} - ${d.location}</h3>
-                                <p class="price">$${d.price?.toLocaleString() || 0}</p>
-                                <p><strong>Score:</strong> <span class="score">${score}/100</span></p>
-                                <p>${(d.description || '').substring(0, 100)}...</p>
-                                <p style="color: #666; font-size: 12px;">${new Date(d.created_at).toLocaleString()}</p>
-                                <button onclick="contactSeller('${d.email}')">💬 Contact Seller</button>
-                            </div>
-                        `;
-                    }).join('');
-                    
-                    document.getElementById('deals').innerHTML = html || '<p>No deals found</p>';
-                }
-                
-                function contactSeller(email) {
-                    alert('Email: ' + email + '\\n\\nIntegration with email system coming soon!');
-                }
-                
-                loadDeals();
-                setInterval(loadDeals, 30000);
-            </script>
-        </body>
-    </html>
-    """
+    return {"status": "healthy"}
 
 @app.post("/admin/webhooks/deal-ingest")
-def ingest_deal(data: DealData):
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "message": "Database not configured"}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        score = 50
-        if data.price < 100000:
-            score += 15
-        if "urgent" in (data.description or "").lower():
-            score += 20
-        
-        cur.execute("""
-            INSERT INTO deals (name, email, asset_type, location, price, description, score, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-        """, (
-            data.name,
-            data.email,
-            data.asset_type,
-            data.location,
-            data.price,
-            data.description,
-            score
-        ))
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"Deal ingested: {data.asset_type} in {data.location}")
-        return {"status": "ok", "message": "Deal ingested"}
-    except Exception as e:
-        logger.error(f"Error ingesting deal: {e}")
-        return {"status": "error", "message": str(e)}
+def ingest(data: DealData):
+    conn = get_db()
+    cur = conn.cursor()
 
-@app.get("/admin/deals")
-def get_deals(limit: int = 100):
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "deals": []}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT id, name, email, asset_type, location, price, description, score, created_at
-            FROM deals 
-            ORDER BY score DESC, created_at DESC 
-            LIMIT %s
-        """, (limit,))
-        deals = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"status": "success", "count": len(deals), "deals": deals}
-    except Exception as e:
-        logger.error(f"Error fetching deals: {e}")
-        return {"status": "error", "deals": []}
+    score = 50
+    if data.price < 100000:
+        score += 15
+    if "urgent" in data.description.lower():
+        score += 20
 
-@app.get("/admin/deals/green")
-def get_green_deals():
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "deals": []}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT * FROM deals 
-            WHERE score >= 15 
-            ORDER BY score DESC, created_at DESC
-            LIMIT 50
-        """)
-        deals = cur.fetchall()
-        cur.close()
-        conn.close()
-        return {"status": "success", "count": len(deals), "deals": deals}
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return {"status": "error", "deals": []}
+    cur.execute("""
+        INSERT INTO deals (name,email,asset_type,location,price,description,score,notified,created_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,false,NOW())
+    """, (
+        data.name, data.email, data.asset_type,
+        data.location, data.price, data.description, score
+    ))
 
-@app.get("/admin/deals/yellow")
-def get_yellow_deals():
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "deals": []}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT * FROM deals 
-            WHERE score >= 7 AND score < 15 
-            ORDER BY score DESC, created_at DESC
-            LIMIT 50
-        """)
-        deals = cur.fetchall()
-        cur.close()
-        conn.close()
-        return {"status": "success", "count": len(deals), "deals": deals}
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return {"status": "error", "deals": []}
+    conn.commit()
+    cur.close()
+    conn.close()
 
-@app.get("/admin/deals/red")
-def get_red_deals():
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "deals": []}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT * FROM deals 
-            WHERE score < 7 
-            ORDER BY score DESC, created_at DESC
-            LIMIT 50
-        """)
-        deals = cur.fetchall()
-        cur.close()
-        conn.close()
-        return {"status": "success", "count": len(deals), "deals": deals}
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return {"status": "error", "deals": []}
+    return {"status": "ok"}
 
 @app.post("/buyers/register")
-def register_buyer(buyer: BuyerRegister):
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "message": "Database not configured"}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        cur.execute("""
-            INSERT INTO buyers (name, email, location, asset_types, min_budget, max_budget, active, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, true, NOW())
-        """, (
-            buyer.name,
-            buyer.email,
-            buyer.location,
-            buyer.asset_types,
-            buyer.min_budget,
-            buyer.max_budget
-        ))
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"Buyer registered: {buyer.email}")
-        return {"status": "ok", "message": "Buyer registered successfully"}
-    except Exception as e:
-        logger.error(f"Error registering buyer: {e}")
-        return {"status": "error", "message": str(e)}
+def register(buyer: BuyerRegister):
+    conn = get_db()
+    cur = conn.cursor()
 
-@app.get("/buyers")
-def get_buyers():
-    if not DATABASE_URL or not psycopg2:
-        return {"status": "error", "buyers": []}
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT id, name, email, location, asset_types, min_budget, max_budget, created_at
-            FROM buyers
-            WHERE active = true
-            ORDER BY created_at DESC
-        """)
-        buyers = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"status": "success", "count": len(buyers), "buyers": buyers}
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return {"status": "error", "buyers": []}
+    cur.execute("""
+        INSERT INTO buyers (name,email,location,asset_types,min_budget,max_budget,active,created_at)
+        VALUES (%s,%s,%s,%s,%s,%s,true,NOW())
+    """, (
+        buyer.name, buyer.email, buyer.location,
+        buyer.asset_types, buyer.min_budget, buyer.max_budget
+    ))
 
-@app.get("/admin/kpis")
-def get_kpis():
-    if not DATABASE_URL or not psycopg2:
-        return {
-            "status": "error",
-            "total_deals": 0,
-            "deals_today": 0,
-            "active_buyers": 0,
-            "avg_deal_value": 0
-        }
-    
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        cur.execute("SELECT COUNT(*) FROM deals")
-        total_deals = cur.fetchone()[0]
-        
-        cur.execute("SELECT COUNT(*) FROM deals WHERE DATE(created_at) = CURRENT_DATE")
-        deals_today = cur.fetchone()[0]
-        
-        cur.execute("SELECT COUNT(*) FROM buyers WHERE active = true")
-        active_buyers = cur.fetchone()[0]
-        
-        cur.execute("SELECT AVG(price) FROM deals")
-        avg_value = cur.fetchone()[0] or 0
-        
-        cur.close()
-        conn.close()
-        
-        return {
-            "status": "ok",
-            "total_deals": total_deals,
-            "deals_today": deals_today,
-            "active_buyers": active_buyers,
-            "avg_deal_value": round(avg_value, 2)
-        }
-    except Exception as e:
-        logger.error(f"Error fetching KPIs: {e}")
-        return {"status": "error", "message": str(e)}
+    conn.commit()
+    cur.close()
+    conn.close()
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin_portal():
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>VortexAI Admin</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%); color: #fff; padding: 20px; min-height: 100vh; }
-            .container { max-width: 1400px; margin: 0 auto; }
-            .header { text-align: center; margin-bottom: 30px; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 10px; }
-            .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-            .status { font-size: 1.2em; color: #4ade80; }
-            .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
-            .metric-card { background: rgba(255,255,255,0.08); padding: 20px; border-radius: 10px; border-left: 4px solid #3b82f6; }
-            .metric-card.green { border-left-color: #10b981; }
-            .metric-card.yellow { border-left-color: #f59e0b; }
-            .metric-card.red { border-left-color: #ef4444; }
-            .metric-value { font-size: 2em; font-weight: bold; margin: 10px 0; }
-            .metric-label { font-size: 0.9em; color: #aaa; }
-            .deals-section { margin-top: 30px; }
-            .deals-title { font-size: 1.8em; margin-bottom: 20px; }
-            .deals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; }
-            .deal-card { background: rgba(255,255,255,0.08); padding: 15px; border-radius: 8px; border-top: 4px solid #3b82f6; }
-            .deal-card.green { border-top-color: #10b981; background: rgba(16,185,129,0.1); }
-            .deal-card.yellow { border-top-color: #f59e0b; background: rgba(245,158,11,0.1); }
-            .deal-card.red { border-top-color: #ef4444; background: rgba(239,68,68,0.1); }
-            .deal-header { display: flex; justify-content: space-between; margin-bottom: 10px; }
-            .deal-price { font-size: 1.5em; font-weight: bold; }
-            .deal-location { color: #aaa; font-size: 0.9em; }
-            .deal-type { display: inline-block; background: rgba(59,130,246,0.3); padding: 4px 8px; border-radius: 4px; font-size: 0.8em; margin-top: 8px; }
-            .loading { text-align: center; padding: 40px; color: #888; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🚀 VortexAI Admin</h1>
-                <div class="status">Live Deal Tracking</div>
-            </div>
+    return {"status": "ok"}
 
-            <div class="metrics" id="metrics">
-                <div class="loading">Loading metrics...</div>
-            </div>
-
-            <div class="deals-section">
-                <h2 class="deals-title">📊 Active Deals</h2>
-                <div class="deals-grid" id="deals">
-                    <div class="loading">Loading deals...</div>
-                </div>
-            </div>
-        </div>
-
-        <script>
-            async function loadMetrics() {
-                try {
-                    const [green, yellow, red, kpi] = await Promise.all([
-                        fetch('/admin/deals/green').then(r => r.json()).catch(() => ({ deals: [] })),
-                        fetch('/admin/deals/yellow').then(r => r.json()).catch(() => ({ deals: [] })),
-                        fetch('/admin/deals/red').then(r => r.json()).catch(() => ({ deals: [] })),
-                        fetch('/admin/kpis').then(r => r.json()).catch(() => ({}))
-                    ]);
-
-                    document.getElementById('metrics').innerHTML = `
-                        <div class="metric-card green">
-                            <div class="metric-label">🟢 GREEN</div>
-                            <div class="metric-value">${green.deals?.length || 0}</div>
-                            <div class="metric-label">$${((green.deals || []).reduce((s, d) => s + (d.price || 0), 0) / 1000).toFixed(1)}K</div>
-                        </div>
-                        <div class="metric-card yellow">
-                            <div class="metric-label">🟡 YELLOW</div>
-                            <div class="metric-value">${yellow.deals?.length || 0}</div>
-                            <div class="metric-label">$${((yellow.deals || []).reduce((s, d) => s + (d.price || 0), 0) / 1000).toFixed(1)}K</div>
-                        </div>
-                        <div class="metric-card red">
-                            <div class="metric-label">🔴 RED</div>
-                            <div class="metric-value">${red.deals?.length || 0}</div>
-                            <div class="metric-label">$${((red.deals || []).reduce((s, d) => s + (d.price || 0), 0) / 1000).toFixed(1)}K</div>
-                        </div>
-                        <div class="metric-card">
-                            <div class="metric-label">📈 Total Deals</div>
-                            <div class="metric-value">${kpi.total_deals || 0}</div>
-                        </div>
-                    `;
-                } catch (e) {
-                    console.error('Error loading metrics:', e);
-                }
-            }
-
-            async function loadDeals() {
-                try {
-                    const [green, yellow, red] = await Promise.all([
-                        fetch('/admin/deals/green').then(r => r.json()).catch(() => ({ deals: [] })),
-                        fetch('/admin/deals/yellow').then(r => r.json()).catch(() => ({ deals: [] })),
-                        fetch('/admin/deals/red').then(r => r.json()).catch(() => ({ deals: [] }))
-                    ]);
-
-                    const allDeals = [
-                        ...(green.deals || []).map(d => ({ ...d, type: 'green' })),
-                        ...(yellow.deals || []).map(d => ({ ...d, type: 'yellow' })),
-                        ...(red.deals || []).map(d => ({ ...d, type: 'red' }))
-                    ].sort((a, b) => (b.price || 0) - (a.price || 0)).slice(0, 50);
-
-                    document.getElementById('deals').innerHTML = allDeals.map(deal => `
-                        <div class="deal-card ${deal.type}">
-                            <div class="deal-header">
-                                <span>${deal.asset_type || 'Unknown'}</span>
-                                <span class="deal-price">$${(deal.price || 0).toLocaleString()}</span>
-                            </div>
-                            <div class="deal-location">📍 ${deal.location || 'Unknown'}</div>
-                            <span class="deal-type">Score: ${deal.score}/100</span>
-                        </div>
-                    `).join('') || '<div class="loading">No deals yet</div>';
-                } catch (e) {
-                    console.error('Error loading deals:', e);
-                }
-            }
-
-            loadMetrics();
-            loadDeals();
-            setInterval(() => { loadMetrics(); loadDeals(); }, 10000);
-        </script>
-    </body>
-    </html>
-    """
-    return html
+@app.get("/admin/deals")
+def deals():
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT * FROM deals ORDER BY created_at DESC LIMIT 100")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {"deals": rows}
