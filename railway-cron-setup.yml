@@ -1,0 +1,10 @@
+name: VortexAI Deal Scanner
+description: Automated deal finding across 65 sources every 30 minutes
+schedule: '*/30 * * * *'
+timeout: 300
+environment:
+  NODE_ENV: production
+  API_BASE_URL: ${{ VORTEX_BACKEND_URL }}
+  DATABASE_URL: ${{ DATABASE_URL }}
+  BREVO_SMTP_USER: ${{ BREVO_SMTP_USER }}
+  BREVO_SMTP_PASSWORD: ${{ BREVO_SMTP_PASSWORD }}
