@@ -18,14 +18,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import buyer notifications
-try:
-    from buyer_notifications import run_buyer_notifications
-    HAS_BUYER_NOTIFICATIONS = True
-except ImportError:
-    HAS_BUYER_NOTIFICATIONS = False
-    logger.warning("Buyer notifications module not available")
-
 app = FastAPI(title="VortexAI", version="3.0.0")
 
 app.add_middleware(
@@ -46,8 +38,6 @@ def get_db_connection():
         raise Exception("DATABASE_URL not set")
     return psycopg2.connect(DATABASE_URL)
 
-# ==================== MODELS ====================
-
 class DealData(BaseModel):
     name: str
     email: str
@@ -60,11 +50,9 @@ class BuyerRegister(BaseModel):
     name: str
     email: str
     location: str = ""
-    asset_types: str = "real_estate"  # comma-separated
+    asset_types: str = "real_estate"
     min_budget: float = 0
     max_budget: float = 1000000
-
-# ==================== HEALTH ====================
 
 @app.get("/")
 def root():
@@ -72,7 +60,6 @@ def root():
 
 @app.get("/health")
 def health():
-    """Health check with database status"""
     if not DATABASE_URL:
         return {"status": "operational", "service": "VortexAI", "version": "3.0.0", "db": "not_configured"}
     
@@ -98,11 +85,8 @@ def health():
         logger.error(f"Health check error: {e}")
         return {"status": "operational", "service": "VortexAI", "version": "3.0.0", "db": "error", "error": str(e)}
 
-# ==================== PORTALS ====================
-
 @app.get("/seller", response_class=HTMLResponse)
 def seller_portal():
-    """Seller submission form"""
     return """
     <html>
         <head>
@@ -171,7 +155,6 @@ def seller_portal():
 
 @app.get("/buyer", response_class=HTMLResponse)
 def buyer_portal():
-    """Buyer deal browsing portal"""
     return """
     <html>
         <head>
@@ -182,12 +165,7 @@ def buyer_portal():
                 .filter-box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
                 .filter-box input, .filter-box select { padding: 8px; margin-right: 10px; border-radius: 4px; border: 1px solid #ddd; }
                 .deals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-                .deal-card { 
-                    border-radius: 8px; 
-                    padding: 20px; 
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                    border-left: 5px solid;
-                }
+                .deal-card { border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 5px solid; }
                 .deal-card.green { border-left-color: #28a745; background: #f0fff4; }
                 .deal-card.yellow { border-left-color: #ffc107; background: #fffef0; }
                 .deal-card.red { border-left-color: #dc3545; background: #ffe6e6; }
@@ -259,11 +237,8 @@ def buyer_portal():
     </html>
     """
 
-# ==================== DEAL INGESTION ====================
-
 @app.post("/admin/webhooks/deal-ingest")
 def ingest_deal(data: DealData):
-    """Ingest new deals from scrapers"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "message": "Database not configured"}
     
@@ -300,11 +275,8 @@ def ingest_deal(data: DealData):
         logger.error(f"Error ingesting deal: {e}")
         return {"status": "error", "message": str(e)}
 
-# ==================== DEAL MANAGEMENT ====================
-
 @app.get("/admin/deals")
 def get_deals(limit: int = 100):
-    """Get all deals with scoring"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "deals": []}
     
@@ -312,11 +284,7 @@ def get_deals(limit: int = 100):
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("""
-            SELECT id, name, email, asset_type, location, price, 
-                   description, score, created_at, source,
-                   (score >= 15) AS is_green,
-                   (score >= 7 AND score < 15) AS is_yellow,
-                   (score < 7) AS is_red
+            SELECT id, name, email, asset_type, location, price, description, score, created_at
             FROM deals 
             ORDER BY score DESC, created_at DESC 
             LIMIT %s
@@ -332,7 +300,6 @@ def get_deals(limit: int = 100):
 
 @app.get("/admin/deals/green")
 def get_green_deals():
-    """Get excellent deals (score >= 15)"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "deals": []}
     
@@ -355,7 +322,6 @@ def get_green_deals():
 
 @app.get("/admin/deals/yellow")
 def get_yellow_deals():
-    """Get good deals (score 7-15)"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "deals": []}
     
@@ -378,7 +344,6 @@ def get_yellow_deals():
 
 @app.get("/admin/deals/red")
 def get_red_deals():
-    """Get weak deals (score < 7)"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "deals": []}
     
@@ -399,11 +364,8 @@ def get_red_deals():
         logger.error(f"Error: {e}")
         return {"status": "error", "deals": []}
 
-# ==================== BUYER MANAGEMENT ====================
-
 @app.post("/buyers/register")
 def register_buyer(buyer: BuyerRegister):
-    """Register a new buyer"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "message": "Database not configured"}
     
@@ -435,7 +397,6 @@ def register_buyer(buyer: BuyerRegister):
 
 @app.get("/buyers")
 def get_buyers():
-    """Get all active buyers"""
     if not DATABASE_URL or not psycopg2:
         return {"status": "error", "buyers": []}
     
@@ -457,24 +418,8 @@ def get_buyers():
         logger.error(f"Error: {e}")
         return {"status": "error", "buyers": []}
 
-# ==================== TRIGGER ENDPOINTS ====================
-
-@app.post("/triggers/send-deals-to-buyers")
-def trigger_send_deals_to_buyers():
-    """Trigger endpoint for scheduled buyer notifications (fires every 5 min)"""
-    if not HAS_BUYER_NOTIFICATIONS:
-        return {"status": "error", "message": "Buyer notifications not available"}
-    
-    try:
-        result = run_buyer_notifications()
-        return {"status": "ok", **result}
-    except Exception as e:
-        logger.error(f"Error in buyer notifications: {e}")
-        return {"status": "error", "message": str(e)}
-
 @app.get("/admin/kpis")
 def get_kpis():
-    """Get KPI metrics"""
     if not DATABASE_URL or not psycopg2:
         return {
             "status": "error",
@@ -508,53 +453,29 @@ def get_kpis():
             "total_deals": total_deals,
             "deals_today": deals_today,
             "active_buyers": active_buyers,
-            "avg_deal_value": round(avg_value, 2),
-            "timestamp": datetime.now().isoformat()
+            "avg_deal_value": round(avg_value, 2)
         }
     except Exception as e:
         logger.error(f"Error fetching KPIs: {e}")
         return {"status": "error", "message": str(e)}
 
-@app.get("/admin/dashboard", response_class=HTMLResponse)
-def admin_dashboard():
-    """Real-time admin dashboard with deals and KPIs"""
-    return """
+@app.get("/admin", response_class=HTMLResponse)
+def admin_portal():
+    html = """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>VortexAI Admin Dashboard</title>
+        <title>VortexAI Admin</title>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-                color: #fff;
-                padding: 20px;
-                min-height: 100vh;
-            }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%); color: #fff; padding: 20px; min-height: 100vh; }
             .container { max-width: 1400px; margin: 0 auto; }
-            .header {
-                text-align: center;
-                margin-bottom: 30px;
-                padding: 20px;
-                background: rgba(255,255,255,0.05);
-                border-radius: 10px;
-            }
+            .header { text-align: center; margin-bottom: 30px; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 10px; }
             .header h1 { font-size: 2.5em; margin-bottom: 10px; }
             .status { font-size: 1.2em; color: #4ade80; }
-            .metrics {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 15px;
-                margin-bottom: 30px;
-            }
-            .metric-card {
-                background: rgba(255,255,255,0.08);
-                padding: 20px;
-                border-radius: 10px;
-                border-left: 4px solid #3b82f6;
-            }
+            .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+            .metric-card { background: rgba(255,255,255,0.08); padding: 20px; border-radius: 10px; border-left: 4px solid #3b82f6; }
             .metric-card.green { border-left-color: #10b981; }
             .metric-card.yellow { border-left-color: #f59e0b; }
             .metric-card.red { border-left-color: #ef4444; }
@@ -562,19 +483,8 @@ def admin_dashboard():
             .metric-label { font-size: 0.9em; color: #aaa; }
             .deals-section { margin-top: 30px; }
             .deals-title { font-size: 1.8em; margin-bottom: 20px; }
-            .deals-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-                gap: 15px;
-            }
-            .deal-card {
-                background: rgba(255,255,255,0.08);
-                padding: 15px;
-                border-radius: 8px;
-                border-top: 4px solid #3b82f6;
-                display: flex;
-                flex-direction: column;
-            }
+            .deals-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px; }
+            .deal-card { background: rgba(255,255,255,0.08); padding: 15px; border-radius: 8px; border-top: 4px solid #3b82f6; }
             .deal-card.green { border-top-color: #10b981; background: rgba(16,185,129,0.1); }
             .deal-card.yellow { border-top-color: #f59e0b; background: rgba(245,158,11,0.1); }
             .deal-card.red { border-top-color: #ef4444; background: rgba(239,68,68,0.1); }
@@ -582,16 +492,14 @@ def admin_dashboard():
             .deal-price { font-size: 1.5em; font-weight: bold; }
             .deal-location { color: #aaa; font-size: 0.9em; }
             .deal-type { display: inline-block; background: rgba(59,130,246,0.3); padding: 4px 8px; border-radius: 4px; font-size: 0.8em; margin-top: 8px; }
-            .deal-contact { color: #888; font-size: 0.85em; margin-top: 10px; }
             .loading { text-align: center; padding: 40px; color: #888; }
-            .error { color: #ef4444; padding: 20px; background: rgba(239,68,68,0.1); border-radius: 8px; margin: 20px 0; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>🚀 VortexAI Admin Dashboard</h1>
-                <div class="status">Live Deal Tracking & Analytics</div>
+                <h1>🚀 VortexAI Admin</h1>
+                <div class="status">Live Deal Tracking</div>
             </div>
 
             <div class="metrics" id="metrics">
@@ -616,30 +524,25 @@ def admin_dashboard():
                         fetch('/admin/kpis').then(r => r.json()).catch(() => ({}))
                     ]);
 
-                    const totalDeals = (green.deals?.length || 0) + (yellow.deals?.length || 0) + (red.deals?.length || 0);
-                    const totalValue = [...(green.deals || []), ...(yellow.deals || []), ...(red.deals || [])]
-                        .reduce((sum, d) => sum + (d.price || 0), 0);
-
                     document.getElementById('metrics').innerHTML = `
                         <div class="metric-card green">
-                            <div class="metric-label">🟢 GREEN (Excellent)</div>
+                            <div class="metric-label">🟢 GREEN</div>
                             <div class="metric-value">${green.deals?.length || 0}</div>
                             <div class="metric-label">$${((green.deals || []).reduce((s, d) => s + (d.price || 0), 0) / 1000).toFixed(1)}K</div>
                         </div>
                         <div class="metric-card yellow">
-                            <div class="metric-label">🟡 YELLOW (Good)</div>
+                            <div class="metric-label">🟡 YELLOW</div>
                             <div class="metric-value">${yellow.deals?.length || 0}</div>
                             <div class="metric-label">$${((yellow.deals || []).reduce((s, d) => s + (d.price || 0), 0) / 1000).toFixed(1)}K</div>
                         </div>
                         <div class="metric-card red">
-                            <div class="metric-label">🔴 RED (Weak)</div>
+                            <div class="metric-label">🔴 RED</div>
                             <div class="metric-value">${red.deals?.length || 0}</div>
                             <div class="metric-label">$${((red.deals || []).reduce((s, d) => s + (d.price || 0), 0) / 1000).toFixed(1)}K</div>
                         </div>
                         <div class="metric-card">
-                            <div class="metric-label">📈 Total Value</div>
-                            <div class="metric-value">$${(totalValue / 1000000).toFixed(1)}M</div>
-                            <div class="metric-label">${totalDeals} deals</div>
+                            <div class="metric-label">📈 Total Deals</div>
+                            <div class="metric-value">${kpi.total_deals || 0}</div>
                         </div>
                     `;
                 } catch (e) {
@@ -661,11 +564,6 @@ def admin_dashboard():
                         ...(red.deals || []).map(d => ({ ...d, type: 'red' }))
                     ].sort((a, b) => (b.price || 0) - (a.price || 0)).slice(0, 50);
 
-                    if (allDeals.length === 0) {
-                        document.getElementById('deals').innerHTML = '<div class="loading">No deals yet. Scrapers running...</div>';
-                        return;
-                    }
-
                     document.getElementById('deals').innerHTML = allDeals.map(deal => `
                         <div class="deal-card ${deal.type}">
                             <div class="deal-header">
@@ -673,26 +571,19 @@ def admin_dashboard():
                                 <span class="deal-price">$${(deal.price || 0).toLocaleString()}</span>
                             </div>
                             <div class="deal-location">📍 ${deal.location || 'Unknown'}</div>
-                            <span class="deal-type">${deal.type.toUpperCase()}</span>
-                            <div class="deal-contact">
-                                ${deal.name ? '👤 ' + deal.name : ''}
-                                ${deal.email ? '<br>📧 ' + deal.email : ''}
-                            </div>
+                            <span class="deal-type">Score: ${deal.score}/100</span>
                         </div>
-                    `).join('');
+                    `).join('') || '<div class="loading">No deals yet</div>';
                 } catch (e) {
                     console.error('Error loading deals:', e);
-                    document.getElementById('deals').innerHTML = '<div class="error">Error loading deals. Database may be offline.</div>';
                 }
             }
 
             loadMetrics();
             loadDeals();
-            setInterval(() => {
-                loadMetrics();
-                loadDeals();
-            }, 10000);
+            setInterval(() => { loadMetrics(); loadDeals(); }, 10000);
         </script>
     </body>
     </html>
     """
+    return html
