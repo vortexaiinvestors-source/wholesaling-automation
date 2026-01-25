@@ -1,68 +1,133 @@
 #!/usr/bin/env python3
 """
-Real Estate Wholesaling System
-Master Scraper Orchestrator
+VortexAI Master Scraper Orchestrator (WORKING)
 
-Manages all 25+ property scrapers and coordinates:
-- Zillow, Redfin, Facebook, Craigslist, and 20+ other sources
-- Regional coverage (50 US states + 13 Canadian provinces)
-- Daily target: 3,500-5,000 properties
-- Automatic property storage and analysis
+Goal:
+- Generate deals (from scrapers later)
+- Send deals to FastAPI backend using DatabaseConnector
+- Confirm ingestion works end-to-end
+
+This version:
+✅ Proves end-to-end flow right now (without needing Zillow/Redfin keys)
+✅ Creates a few test deals and sends them to your Railway backend
+✅ Lets you validate /admin/deals immediately
+
+Later:
+You can plug real scrapers into `collect_deals()`.
 """
 
 import os
-import sys
-import json
 import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-import asyncio
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-
-import requests
+from datetime import datetime
+from typing import List, Dict, Any
 from dotenv import load_dotenv
 
-# Load environment variables
+from database_connector import DatabaseConnector
+
+# Load env vars (.env locally; Railway variables in production)
 load_dotenv()
 
-# ============================================
-# LOGGING SETUP
-# ============================================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('logs/scrapers.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# ---------------------------
+# LOGGING
+# ---------------------------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("master_scraper")
 
-# ============================================
-# CONFIGURATION
-# ============================================
-
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-SCRAPERAPI_KEY = os.getenv('SCRAPERAPI_KEY')
-APIFY_API_KEY = os.getenv('APIFY_API_KEY')
-
-# Scraper sources configuration
-SOURCES_CONFIG = {
-    'zillow': {'name': 'Zillow', 'enabled': True, 'frequency_minutes': 30, 'priority': 1, 'coverage': 'all_regions', 'estimated_listings': 1000},
-    'redfin': {'name': 'Redfin', 'enabled': True, 'frequency_minutes': 30, 'priority': 1, 'coverage': 'all_regions', 'estimated_listings': 800},
-    'facebook_marketplace': {'name': 'Facebook Marketplace', 'enabled': True, 'frequency_minutes': 30, 'priority': 2, 'coverage': 'all_regions', 'estimated_listings': 600},
-    'craigslist': {'name': 'Craigslist', 'enabled': True, 'frequency_minutes': 30, 'priority': 2, 'coverage': 'all_regions', 'estimated_listings': 500},
-}
-
-# US States + Canadian Provinces
+# ---------------------------
+# CONFIG
+# ---------------------------
 REGIONS = {
-    'US': ['AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'],
-    'CANADA': ['ON', 'QC', 'BC', 'AB', 'MB', 'SK', 'NS', 'NB', 'NL', 'PE', 'NT', 'NU', 'YT']
+    "CANADA": ["MB", "ON", "AB", "BC", "SK"],
+    "US": ["TX", "FL", "GA", "AZ"]
 }
 
-if __name__ == '__main__':
-    logger.info('Real Estate Wholesaling System - Master Scraper Ready')
-    logger.info(f'Configured sources: {list(SOURCES_CONFIG.keys())}')
-    logger.info(f'Coverage: {len(REGIONS["US"])} US states + {len(REGIONS["CANADA"])} Canadian provinces')
+SOURCES = ["zillow", "redfin", "facebook_marketplace", "craigslist"]
+
+
+def collect_deals() -> List[Dict[str, Any]]:
+    """
+    TEMP: Create a few test deals.
+    Replace this later with real scraper results.
+    """
+    now = datetime.utcnow().isoformat()
+    deals = [
+        {
+            "seller_name": "Test Seller A",
+            "email": "sellerA@test.com",
+            "address": "123 Oak St",
+            "city": "Winnipeg",
+            "state": "MB",
+            "zip_code": "R3C 0A1",
+            "list_price": 90000,
+            "mao": 85000,
+            "estimated_arv": 160000,
+            "estimated_repairs": 25000,
+            "source": "orchestrator-test",
+            "source_url": "https://example.com/deal/123-oak",
+            "ai_score": 75,
+            "timestamp": now,
+        },
+        {
+            "seller_name": "Test Seller B",
+            "email": "sellerB@test.com",
+            "address": "55 River Rd",
+            "city": "Winnipeg",
+            "state": "MB",
+            "zip_code": "R2C 1B2",
+            "list_price": 120000,
+            "mao": 100000,
+            "estimated_arv": 190000,
+            "estimated_repairs": 35000,
+            "source": "orchestrator-test",
+            "source_url": "https://example.com/deal/55-river",
+            "ai_score": 82,
+            "timestamp": now,
+        },
+        {
+            "seller_name": "Test Seller C",
+            "email": "sellerC@test.com",
+            "address": "9 Sunset Blvd",
+            "city": "Winnipeg",
+            "state": "MB",
+            "zip_code": "R2W 2C3",
+            "list_price": 65000,
+            "mao": 60000,
+            "estimated_arv": 130000,
+            "estimated_repairs": 30000,
+            "source": "orchestrator-test",
+            "source_url": "https://example.com/deal/9-sunset",
+            "ai_score": 60,
+            "timestamp": now,
+        },
+    ]
+    return deals
+
+
+def run_once() -> None:
+    """
+    Runs a single cycle:
+    1) Collect deals
+    2) Send to backend
+    """
+    logger.info("🚀 Starting orchestrator run...")
+    db = DatabaseConnector()
+
+    deals = collect_deals()
+    logger.info(f"Collected {len(deals)} deals (test mode)")
+
+    sent = 0
+    failed = 0
+
+    for d in deals:
+        ok = db.store_property(d)
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+
+    logger.info(f"✅ Done. Sent={sent} Failed={failed}")
+    logger.info("Now check: /admin/deals on your Railway API.")
+
+
+if __name__ == "__main__":
+    run_once()
