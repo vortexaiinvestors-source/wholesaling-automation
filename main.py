@@ -1,3 +1,4 @@
+from services.ai_assistant import analyze_deal
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
