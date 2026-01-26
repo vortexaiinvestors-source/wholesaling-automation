@@ -1,17 +1,181 @@
-{
-  "sources": {
-    "zillow": {"name": "Zillow", "enabled": true, "priority": 1, "estimated_listings_daily": 1000},
-    "redfin": {"name": "Redfin", "enabled": true, "priority": 1, "estimated_listings_daily": 800},
-    "facebook_marketplace": {"name": "Facebook Marketplace", "enabled": true, "priority": 2, "estimated_listings_daily": 600},
-    "craigslist": {"name": "Craigslist", "enabled": true, "priority": 2, "estimated_listings_daily": 500},
-    "offerpad": {"name": "OfferPad", "enabled": true, "priority": 3, "estimated_listings_daily": 200},
-    "opendoor": {"name": "Opendoor", "enabled": true, "priority": 3, "estimated_listings_daily": 200},
-    "fsbo": {"name": "FSBO.com", "enabled": true, "priority": 2, "estimated_listings_daily": 300},
-    "forsalebyowner": {"name": "ForSaleByOwner", "enabled": true, "priority": 2, "estimated_listings_daily": 300},
-    "batchleads": {"name": "BatchLeads", "enabled": true, "priority": 1, "estimated_listings_daily": 500},
-    "propstream": {"name": "PropStream", "enabled": true, "priority": 1, "estimated_listings_daily": 400}
-  },
-  "daily_target_listings": 3500,
-  "max_workers": 10,
-  "timeout_seconds": 30
-}
+PHASE 2 — Seller + Buyer intake automation
+Seller side
+
+Page: /sell
+
+AI collects:
+
+Name
+
+Phone
+
+Asset type
+
+Location
+
+Price
+
+Description
+
+Auto-ingested into system.
+
+Buyer side
+
+Page: /buyers/apply
+
+AI collects:
+
+Asset types
+
+Budget
+
+Location
+
+Phone
+
+Email
+
+Tagged as:
+
+free
+
+paid
+
+enterprise
+
+PHASE 3 — Deal lifecycle system (professional)
+
+Every deal gets:
+
+new
+matched
+contacted
+negotiating
+under_contract
+sold
+failed
+
+
+So you always see:
+
+What’s working
+
+What’s stuck
+
+What’s paying
+
+PHASE 4 — Contracts automation (AI helper)
+
+Not full legal AI (yet), but:
+
+AI will:
+
+Fill contract templates
+
+Prepare:
+
+Wholesale agreement
+
+Assignment agreement
+
+Send to e-signature platform later
+
+You approve → send → close.
+
+PHASE 5 — Source expansion (smart way)
+
+You were right about sources — but here’s the winning strategy:
+
+Start with:
+
+25 sources per category for:
+
+Real estate
+
+Cars
+
+Trucks
+
+Construction / farm
+
+Luxury watches
+
+Businesses for sale
+
+Wholesale products
+
+Later expand to 50–100.
+
+Locations:
+
+USA: top 100 cities
+
+Canada: top 50 cities
+
+But:
+
+⚠️ Quality sources > random sites
+
+We target:
+
+Facebook Marketplace
+
+Groups
+
+Auctions
+
+Dealer platforms
+
+Wholesalers
+
+Business brokers
+
+PHASE 6 — AI buyer discovery (next level)
+
+AI will also:
+
+Scrape “Looking to buy” posts
+
+Track:
+
+“WTB car”
+
+“Looking for property”
+
+“Need truck”
+
+“Cash buyer”
+
+Add them into buyers table.
+
+That’s where big money comes from.
+
+PHASE 7 — Stripe automation (after core)
+
+AI will:
+
+Check subscription
+
+Lock premium deals
+
+Upgrade buyers
+
+Take finder fees
+
+Handle deposits
+
+TODAY’S WORK ORDER (REALISTIC)
+
+If we focus:
+
+✅ Must do
+
+Finish SMS + email automation
+
+Add seller intake endpoint
+
+Add buyer intake endpoint
+
+Add deal_status column
+
+Add notifications table
