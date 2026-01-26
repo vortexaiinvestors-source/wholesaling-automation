@@ -19,7 +19,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app_production")
 
-app = FastAPI(title="VortexAI", version="3.2.0")
+app = FastAPI(title="VortexAI", version="3.2.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,14 +30,15 @@ app.add_middleware(
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL not set")
 
 logger.info("Database configured")
 
+
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
+
 
 # =======================
 # MODELS
@@ -55,6 +56,7 @@ class DealData(BaseModel):
     ai_score: int = 60
     metadata: Optional[Dict[str, Any]] = None
 
+
 class BuyerRegister(BaseModel):
     name: str
     email: str
@@ -63,6 +65,18 @@ class BuyerRegister(BaseModel):
     min_budget: float = 0
     max_budget: float = 10000000
 
+
+# =======================
+# HELPERS
+# =======================
+
+def json_dump(obj):
+    if obj is None:
+        return None
+    import json
+    return json.dumps(obj)
+
+
 # =======================
 # BASIC ENDPOINTS
 # =======================
@@ -70,6 +84,7 @@ class BuyerRegister(BaseModel):
 @app.get("/")
 def root():
     return {"system": "VortexAI", "status": "operational"}
+
 
 @app.get("/health")
 def health():
@@ -92,13 +107,17 @@ def health():
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
+
 # =======================
 # DEAL INGEST (LEVEL 2 + 3)
 # =======================
 
 @app.post("/admin/webhooks/deal-ingest")
 def ingest_deal(data: DealData):
+    conn = None
+    cur = None
     try:
+        # Deal dict from request
         deal_data = data.dict()
 
         # -------- Level 2: AI Scoring --------
@@ -108,6 +127,7 @@ def ingest_deal(data: DealData):
         conn = get_db_connection()
         cur = conn.cursor()
 
+        # Insert deal
         cur.execute("""
             INSERT INTO deals (
                 name, email, asset_type, location, price, description,
@@ -123,10 +143,10 @@ def ingest_deal(data: DealData):
             deal_data["location"],
             deal_data["price"],
             deal_data["description"],
-            deal_data["profit_score"],
-            deal_data["urgency_score"],
-            deal_data["risk_score"],
-            deal_data["ai_score"],
+            deal_data.get("profit_score", 0),
+            deal_data.get("urgency_score", 0),
+            deal_data.get("risk_score", 0),
+            deal_data.get("ai_score", 0),
             deal_data.get("url"),
             deal_data.get("source"),
             json_dump(deal_data.get("metadata"))
@@ -135,39 +155,52 @@ def ingest_deal(data: DealData):
         deal_id = cur.fetchone()[0]
 
         # -------- Level 3: Buyer Matching --------
-        cur.execute("SELECT * FROM buyers WHERE active=true")
-        buyers = cur.fetchall()
+        # IMPORTANT FIX:
+        # buyers must be dict rows (RealDictCursor) so matching.py can use buyer["..."]
+        cur_b = conn.cursor(cursor_factory=RealDictCursor)
+        cur_b.execute("SELECT * FROM buyers WHERE active = true")
+        buyers = cur_b.fetchall()
+        cur_b.close()
 
         matches = match_buyers({"id": deal_id, **deal_data}, buyers)
 
-        for m in matches:
-            cur.execute("""
-                INSERT INTO deal_matches (deal_id, buyer_id, status, created_at)
-                VALUES (%s,%s,'matched',NOW())
-            """, (m["deal_id"], m["buyer_id"]))
+        # Save matches (if any)
+        if matches:
+            for m in matches:
+                cur.execute("""
+                    INSERT INTO deal_matches (deal_id, buyer_id, status, created_at)
+                    VALUES (%s,%s,'matched',NOW())
+                """, (m["deal_id"], m["buyer_id"]))
 
         conn.commit()
-        cur.close()
-        conn.close()
 
-        logger.info(f"✅ Deal #{deal_id} scored={deal_data['ai_score']} matched={len(matches)}")
+        logger.info(f"✅ Deal #{deal_id} scored={deal_data.get('ai_score')} matched={len(matches)}")
 
         return {
             "status": "ok",
             "deal_id": deal_id,
-            "ai_score": deal_data["ai_score"],
+            "ai_score": deal_data.get("ai_score", 0),
             "matches": len(matches)
         }
 
     except Exception as e:
+        if conn:
+            conn.rollback()
         logger.error(f"❌ ingest failed: {e}")
         return {"status": "error", "message": str(e)}
 
-def json_dump(obj):
-    if obj is None:
-        return None
-    import json
-    return json.dumps(obj)
+    finally:
+        try:
+            if cur:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
 
 # =======================
 # DEAL QUERIES
@@ -186,23 +219,26 @@ def get_deals(limit: int = 100):
     """, (limit,))
 
     deals = cur.fetchall()
-
     cur.close()
     conn.close()
 
     return {"status": "success", "count": len(deals), "deals": deals}
 
+
 @app.get("/admin/deals/green")
 def get_green_deals():
     return get_by_score(80, 100)
+
 
 @app.get("/admin/deals/yellow")
 def get_yellow_deals():
     return get_by_score(60, 79)
 
+
 @app.get("/admin/deals/red")
 def get_red_deals():
     return get_by_score(0, 59)
+
 
 def get_by_score(min_s, max_s):
     conn = get_db_connection()
@@ -217,11 +253,33 @@ def get_by_score(min_s, max_s):
     """, (min_s, max_s))
 
     deals = cur.fetchall()
-
     cur.close()
     conn.close()
 
     return {"status": "success", "count": len(deals), "deals": deals}
+
+
+# =======================
+# MATCHES (ADMIN)
+# =======================
+
+@app.get("/admin/matches")
+def admin_matches(limit: int = 100):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    cur.execute("""
+        SELECT *
+        FROM deal_matches
+        ORDER BY created_at DESC
+        LIMIT %s
+    """, (limit,))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {"status": "success", "count": len(rows), "matches": rows}
+
 
 # =======================
 # BUYERS
@@ -251,19 +309,20 @@ def register_buyer(buyer: BuyerRegister):
 
     return {"status": "ok"}
 
+
 @app.get("/buyers")
 def get_buyers():
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     cur.execute("SELECT * FROM buyers WHERE active=true")
-
     buyers = cur.fetchall()
 
     cur.close()
     conn.close()
 
     return {"status": "success", "count": len(buyers), "buyers": buyers}
+
 
 # =======================
 # KPI
@@ -295,6 +354,7 @@ def get_kpis():
         "active_buyers": buyers,
         "avg_price": round(avg_price, 2)
     }
+
 
 # =======================
 # ADMIN UI
