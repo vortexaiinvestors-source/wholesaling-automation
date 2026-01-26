@@ -11,12 +11,15 @@ from typing import Optional, Dict, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from services.scoring import score_deal
+from services.matching import match_buyers
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("app_production")
 
-app = FastAPI(title="VortexAI", version="3.1.0")
+app = FastAPI(title="VortexAI", version="3.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,7 +54,6 @@ class DealData(BaseModel):
     source: Optional[str] = None
     ai_score: int = 60
     metadata: Optional[Dict[str, Any]] = None
-
 
 class BuyerRegister(BaseModel):
     name: str
@@ -91,43 +93,71 @@ def health():
         return {"status": "error", "error": str(e)}
 
 # =======================
-# DEAL INGEST
+# DEAL INGEST (LEVEL 2 + 3)
 # =======================
 
 @app.post("/admin/webhooks/deal-ingest")
 def ingest_deal(data: DealData):
     try:
+        deal_data = data.dict()
+
+        # -------- Level 2: AI Scoring --------
+        scores = score_deal(deal_data)
+        deal_data.update(scores)
+
         conn = get_db_connection()
         cur = conn.cursor()
 
         cur.execute("""
             INSERT INTO deals (
                 name, email, asset_type, location, price, description,
-                score, url, source, metadata, created_at
+                profit_score, urgency_score, risk_score, score,
+                url, source, metadata, created_at
             )
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
             RETURNING id
         """, (
-            data.name,
-            data.email,
-            data.asset_type,
-            data.location,
-            data.price,
-            data.description,
-            data.ai_score,
-            data.url,
-            data.source,
-            json_dump(data.metadata)
+            deal_data["name"],
+            deal_data["email"],
+            deal_data["asset_type"],
+            deal_data["location"],
+            deal_data["price"],
+            deal_data["description"],
+            deal_data["profit_score"],
+            deal_data["urgency_score"],
+            deal_data["risk_score"],
+            deal_data["ai_score"],
+            deal_data.get("url"),
+            deal_data.get("source"),
+            json_dump(deal_data.get("metadata"))
         ))
 
         deal_id = cur.fetchone()[0]
+
+        # -------- Level 3: Buyer Matching --------
+        cur.execute("SELECT * FROM buyers WHERE active=true")
+        buyers = cur.fetchall()
+
+        matches = match_buyers({"id": deal_id, **deal_data}, buyers)
+
+        for m in matches:
+            cur.execute("""
+                INSERT INTO deal_matches (deal_id, buyer_id, status, created_at)
+                VALUES (%s,%s,'matched',NOW())
+            """, (m["deal_id"], m["buyer_id"]))
+
         conn.commit()
         cur.close()
         conn.close()
 
-        logger.info(f"✅ Deal ingested #{deal_id} {data.asset_type} {data.location}")
+        logger.info(f"✅ Deal #{deal_id} scored={deal_data['ai_score']} matched={len(matches)}")
 
-        return {"status": "ok", "deal_id": deal_id}
+        return {
+            "status": "ok",
+            "deal_id": deal_id,
+            "ai_score": deal_data["ai_score"],
+            "matches": len(matches)
+        }
 
     except Exception as e:
         logger.error(f"❌ ingest failed: {e}")
