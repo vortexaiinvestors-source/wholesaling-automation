@@ -2,24 +2,28 @@ def match_buyers(deal: dict, buyers: list) -> list:
     matches = []
 
     for buyer in buyers:
-        if buyer["asset_type"] != deal["asset_type"]:
+
+        # Asset type check
+        if buyer.get("asset_types") != deal.get("asset_type"):
             continue
 
-        if buyer["max_price"] < deal["price"]:
+        # Budget check
+        if buyer.get("max_budget", 0) < deal.get("price", 0):
             continue
 
-        if buyer["city"].lower() not in deal["city"].lower():
+        # Location check (optional)
+        buyer_loc = (buyer.get("location") or "").lower()
+        deal_loc = (deal.get("location") or "").lower()
+        if buyer_loc and buyer_loc not in deal_loc:
             continue
 
-        if buyer["role"] not in ["buyer_paid", "enterprise"]:
-            continue
-
-        if deal["ai_score"] < 60:
+        # AI quality gate
+        if deal.get("ai_score", 0) < 60:
             continue
 
         matches.append({
-            "deal_id": deal["id"],
-            "buyer_id": buyer["id"]
+            "deal_id": deal.get("id"),
+            "buyer_id": buyer.get("id")
         })
 
     return matches
