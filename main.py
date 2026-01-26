@@ -1,5 +1,4 @@
 from services.notifications import notify_buyers_for_deal
-
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
