@@ -1,4 +1,0 @@
-cron:
-  - name: buyer-notifier
-    schedule: "*/5 * * * *"
-    command: python buyer_notifications.py
