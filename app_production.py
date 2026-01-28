@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import logging
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, func
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, func, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from pydantic import BaseModel
 
@@ -120,7 +120,7 @@ async def health():
     """Health check endpoint"""
     try:
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute("text("SELECT 1")")
         db.close()
         return {
             "status": "healthy",
