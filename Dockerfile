@@ -1,0 +1,1 @@
+FROM python:3.12-slimWORKDIR /appCOPY requirements.txt .RUN pip install --no-cache-dir -r requirements.txtCOPY app_production.py .CMD ["uvicorn", "app_production:app", "--host", "0.0.0.0", "--port", "8080"]
