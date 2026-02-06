@@ -1,17 +1,1 @@
-from fastapi import FastAPI
-from datetime import datetime
-import os
-
-app = FastAPI(title="VortexAI", version="1.0.0")
-
-@app.get("/health")
-async def health():
-      return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
-
-@app.get("/info")
-async def info():
-      return {"system": "VortexAI", "version": "1.0.0"}
-
-if __name__ == "__main__":
-      import uvicorn
-      uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
+from fastapi import FastAPIfrom datetime import datetimeimport osimport jsonapp = FastAPI(title="VortexAI", version="1.0.0")@app.get("/health")async def health():    return {"status": "ok", "message": "VortexAI Backend is running", "timestamp": datetime.utcnow().isoformat()}@app.get("/")async def root():    return {"name": "VortexAI Backend", "version": "1.0.0", "status": "active"}@app.post("/admin/webhooks/deal-ingest")async def ingest_deal(data: dict):    return {"status": "received", "message": "Deal ingested successfully"}@app.get("/admin/deals")async def get_deals():    return {"deals": [], "total": 0}if __name__ == "__main__":    import uvicorn    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
