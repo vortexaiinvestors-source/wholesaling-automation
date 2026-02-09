@@ -1,1 +1,16 @@
-#!/usr/bin/env python3import osimport jsonfrom datetime import datetimefrom fastapi import FastAPIfrom fastapi.middleware.cors import CORSMiddlewarefrom pydantic import BaseModelfrom sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, descfrom sqlalchemy.orm import declarative_base, sessionmakerfrom sqlalchemy.pool import QueuePool# FastAPI appapp = FastAPI(title="VortexAI Production Backend")# CORSapp.add_middleware(    CORSMiddleware,    allow_origins=["*"],    allow_credentials=True,    allow_methods=["*"],    allow_headers=["*"],)# Database setupDATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/vortexai")engine = create_engine(    DATABASE_URL,    poolclass=QueuePool,    pool_size=5,    max_overflow=10,    pool_recycle=3600,)Base = declarative_base()SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)# Modelsclass Deal(Base):    __tablename__ = "deals"    id = Column(Integer, primary_key=True)    name = Column(String(255))    email = Column(String(255))    asset_type = Column(String(50))    location = Column(String(255))    price = Column(Float)    description = Column(Text)    ai_score = Column(Float)    recommendation = Column(String(50))    created_at = Column(DateTime, default=datetime.utcnow)# Create tablesBase.metadata.create_all(bind=engine)# Pydantic modelsclass DealRequest(BaseModel):    name: str    email: str    asset_type: str    location: str    price: floatclass DealResponse(BaseModel):    id: int    name: str    email: str    asset_type: str    location: str    price: float    ai_score: float    recommendation: str    created_at: datetime        class Config:        from_attributes = True# Health check@app.get("/health")async def health():    return {"status": "ok", "service": "VortexAI Production"}# Deal ingestion@app.post("/admin/webhooks/deal-ingest")async def ingest_deal(deal: DealRequest):    try:        # Simple AI scoring        score = min(100, max(0, 50 + (1000 - deal.price) / 100))        recommendation = "post_urgent" if score > 75 else ("post" if score > 50 else "skip")                # Save to database        session = SessionLocal()        db_deal = Deal(            name=deal.name,            email=deal.email,            asset_type=deal.asset_type,            location=deal.location,            price=deal.price,            ai_score=score,            recommendation=recommendation,        )        session.add(db_deal)        session.commit()                return {"status": "success", "deal_id": db_deal.id, "ai_score": score}    except Exception as e:        return {"status": "error", "message": str(e)}# Get deals@app.get("/admin/deals")async def get_deals(skip: int = 0, limit: int = 100):    try:        session = SessionLocal()        deals = session.query(Deal).order_by(desc(Deal.created_at)).offset(skip).limit(limit).all()        return [{"id": d.id, "name": d.name, "email": d.email, "price": d.price, "ai_score": d.ai_score} for d in deals]    except Exception as e:        return {"status": "error", "message": str(e)}if __name__ == "__main__":    import uvicorn    uvicorn.run(app, host="0.0.0.0", port=8080)
+#!/usr/bin/env python3
+from fastapi import FastAPI
+
+app = FastAPI(title="VortexAI", version="1.0")
+
+@app.get("/health")
+async def health():
+      return {"status": "ok", "service": "vortexai"}
+
+@app.get("/")
+async def root():
+      return {"message": "VortexAI API Running"}
+
+if __name__ == "__main__":
+      import uvicorn
+      uvicorn.run(app, host="0.0.0.0", port=8080)
